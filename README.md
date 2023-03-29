@@ -1,18 +1,13 @@
-# Loc-NeRF
+# Loc-NeRF-plus
 
-Monte Carlo Localization using Neural Radiance Fields. 
+An Enhanced Monte Carlo Localization using Neural Radiance Fields. 
 
 ## Coordinate Frames
 To be consistent throughout the code and in the yaml files, we define coordinates using the camera frame commonly used for NeRF (x right, y up, z inward from the perspective of the camera) unless stated otherwise. Coordinates are FROM Camera TO World unless otherwise stated. Note this is not the same as the more common camera frame used in robotics (x right, y down, z outward).
 
 ## Publications
-
-If you find this code relevant for your work, please consider citing our paper:
-
+Reference:
 [Loc-NeRF: Monte Carlo Localization using Neural Radiance Fields](https://arxiv.org/abs/2209.09050)
-
-This work was done in collaboration with MIT and Draper Labs and was partially funded 
-by the NASA Flight Opportunities under grant Nos 80NSSC21K0348, ARL DCIST CRA W911NF-17-2-0181, and an Amazon Research Award.
 
 # 1. Installation
 
@@ -23,6 +18,8 @@ by the NASA Flight Opportunities under grant Nos 80NSSC21K0348, ARL DCIST CRA W9
 - If you want to use VIO for the predict step for a real robot demo, install a VIO such as 
 [VINS-Fusion](https://github.com/HKUST-Aerial-Robotics/VINS-Fusion) or [Kimera](https://github.com/MIT-SPARK/Kimera-VIO-ROS).
 
+- We suggest to use Docker to run our algorithms.
+
 # 2. Loc-NeRF installation
 ```bash
 # Setup catkin workspace
@@ -32,7 +29,7 @@ catkin init
 
 # Clone repo
 cd ~/catkin_ws/src
-git clone https://github.com/MIT-SPARK/Loc-NeRF
+git clone https://github.com/JunShao0104/Loc-NeRF-plus
 
 # Compile code
 catkin build
@@ -41,11 +38,11 @@ catkin build
 source ~/catkin_ws/devel/setup.bash
 
 #install dependencies:
-cd ~/catkin_ws/src/Loc-NeRF
+cd ~/catkin_ws/src/Loc-NeRF-plus
 pip install -r requirements.txt
 ```
 
-## Starting Loc-NeRF
+## Starting Loc-NeRF-plus
 We will use ROS and rviz as a structure for running Loc-NeRF and for visualizing performance. 
 As a general good practice, remember to source your workspace for each terminal you use.
 
