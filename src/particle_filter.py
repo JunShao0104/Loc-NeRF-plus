@@ -8,18 +8,21 @@ class ParticleFilter:
     def __init__(self, initial_particles):
         self.num_particles=len(initial_particles['position'])
         self.particles = initial_particles
-        self.weights=np.ones(self.num_particles)
+        self.weights=np.ones(self.num_particles) # sum up to 1
         self.particle_lock = Lock()
 
     def reduce_num_particles(self, num_particles):
         self.particle_lock.acquire()
         self.num_particles = num_particles
         self.weights = self.weights[0:num_particles]
+        # 6DoF, 3D Pose, use position and rotation to represent its 4x4 transformation matrix
         self.particles['position'] = self.particles['position'][0:num_particles]
         self.particles['rotation'] = self.particles['rotation'][0:num_particles]
         self.particle_lock.release()
 
     def predict_no_motion(self, p_x, p_y, p_z, r_x, r_y, r_z):
+        # Motion model 1:
+        # Used for integrating the robot dynamics
         self.particle_lock.acquire()
         self.particles['position'][:,0] += p_x * np.random.normal(size = (self.particles['position'].shape[0]))
         self.particles['position'][:,1] += p_y * np.random.normal(size = (self.particles['position'].shape[0]))
@@ -32,8 +35,48 @@ class ParticleFilter:
             n3 = r_z * np.random.normal()
             self.particles['rotation'][i] = self.particles['rotation'][i].retract(np.array([n1, n2, n3]))
         self.particle_lock.release()
+    
+    def predict_no_motion_i(self, M, particle_position, particle_rotation, p_x, p_y, p_z, r_x, r_y, r_z):
+        # Motion Model for a specific particle
+        self.particle_lock.acquire()
+
+        # Sample the first particle and Add motion noise
+        # Predict position
+        if self.particles['position'] is None:
+            dim = particle_position.shape[0]
+            self.particles['position'] = particle_position.reshape(1, dim)
+            self.particles['position'][0, 0] += p_x * np.random.normal(size = 1)
+            self.particles['position'][0, 1] += p_y * np.random.normal(size = 1)
+            self.particles['position'][0, 2] += p_z * np.random.normal(size = 1)
+        else:
+            self.particles['position'] = np.vstack((self.particles['position'], particle_position))
+            self.particles['position'][M, 0] += p_x * np.random.normal(size = 1)
+            self.particles['position'][M, 1] += p_y * np.random.normal(size = 1)
+            self.particles['position'][M, 2] += p_z * np.random.normal(size = 1)     
+
+        # Predict rotation
+        if self.particles['rotation'] is None:
+            self.particles['rotation'] = [particle_rotation]
+            n1 = r_x * np.random.normal()
+            n2 = r_y * np.random.normal()
+            n3 = r_z * np.random.normal()
+            temp = np.array([n1, n2, n3])
+            self.particles['rotation'][0] = self.particles['rotation'][0].retract(temp)
+            # print("self.particles['rotation'] shape: ", self.particles['rotation'].shape)
+        else:
+            self.particles['rotation'].append(particle_rotation)
+            # print("self.particles['rotation'] shape: ", self.particles['rotation'].shape)
+            n1 = r_x * np.random.normal()
+            n2 = r_y * np.random.normal()
+            n3 = r_z * np.random.normal()
+            temp = np.array([n1, n2, n3])
+            self.particles['rotation'][M] = self.particles['rotation'][M].retract(temp)
+
+        self.particle_lock.release()
 
     def predict_with_delta_pose(self, delta_pose, p_x, p_y, p_z, r_x, r_y, r_z):
+        # Motion model 2:
+        # Used for Visual-inertial odometry
         self.particle_lock.acquire()
 
         # TODO see if this can be made faster
@@ -60,7 +103,7 @@ class ParticleFilter:
         self.particle_lock.release()
 
     def update(self):
-        # use fourth power
+        # use fourth power --- why?
         self.weights = np.square(self.weights)
         self.weights = np.square(self.weights)
 
@@ -69,12 +112,17 @@ class ParticleFilter:
         # print("pre-normalized weight sum", sum_weights)
         self.weights=self.weights / sum_weights
     
-        #resample
+        # resample
         self.particle_lock.acquire()
         choice = np.random.choice(self.num_particles, self.num_particles, p = self.weights, replace=True)
         temp = {'position':np.copy(self.particles['position'])[choice, :], 'rotation':np.copy(self.particles['rotation'])[choice]}
         self.particles = temp
         self.particle_lock.release()
+    
+    def normalize_weight(self):
+        # Normalize the particle weights
+        sum_weights = np.sum(self.weights)
+        self.weights = self.weights / sum_weights
 
     def compute_simple_position_average(self):
         # Simple averaging does not use weighted average or k means.
@@ -92,7 +140,7 @@ class ParticleFilter:
         epsilon = 0.000001
         max_iters = 300
         rotations = self.particles['rotation']
-        R = rotations[0]
+        R = rotations[0] # initial rotation pose
         for i in range(max_iters):
             rot_sum = np.zeros((3))
             for rot in rotations:

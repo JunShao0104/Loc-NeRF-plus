@@ -51,7 +51,7 @@ class Navigator(NavigatorBase):
                 self.vio_sub = rospy.Subscriber(self.pose_topic, Odometry, self.vio_callback, queue_size = 10)
 
         # Show initial distribution of particles
-        if self.plot_particles:
+        if self.plot_particles: # Corresponding the param "visualize_particles": Publish particles to rviz
             self.visualize()
 
         if self.log_results:
@@ -61,6 +61,7 @@ class Navigator(NavigatorBase):
                     np.save(f, self.gt_pose)
 
             # Add initial pose estimate before first update step is run.
+            # Initial guess
             if self.use_weighted_avg:
                 position_est = self.filter.compute_weighted_position_average()
             else:
@@ -79,7 +80,7 @@ class Navigator(NavigatorBase):
             if self.global_loc_mode:
                 trans_rand = 1.0
             else:
-                trans_rand = 0.1
+                trans_rand = 0.1 # 10cm
             
             # get random axis and angle for rotation
             x = np.random.rand()
@@ -111,6 +112,8 @@ class Navigator(NavigatorBase):
                 # 360 degree rotation distribution about yaw
                 self.initial_particles_noise = np.random.uniform(np.array([-trans_rand, -trans_rand, -trans_rand, 0, -179, 0]), np.array([trans_rand, trans_rand, trans_rand, 0, 179, 0]), size = (self.num_particles, 6))
             else:
+                # Sampling from a uniform distribution
+                # x, y, z: -0.1m --- 0.1m
                 self.initial_particles_noise = np.random.uniform(np.array([-trans_rand, -trans_rand, -trans_rand, 0, 0, 0]), np.array([trans_rand, trans_rand, trans_rand, 0, 0, 0]), size = (self.num_particles, 6))
 
             # center translation at randomly sampled position
@@ -140,6 +143,7 @@ class Navigator(NavigatorBase):
 
         self.initial_particles = self.set_initial_particles()
         self.filter = ParticleFilter(self.initial_particles)
+        self.last_particle_num = len(self.initial_particles['position'])
 
     def vio_callback(self, msg):
         # extract rotation and position from msg
@@ -201,7 +205,9 @@ class Navigator(NavigatorBase):
         total_nerf_time = 0
 
         if self.sampling_strategy == 'random':
+            # self.nerf.coords shape: (H * W, 2)
             rand_inds = np.random.choice(self.nerf.coords.shape[0], size=self.nerf.batch_size, replace=False)
+            # batch shape: (batch_size, 2)
             batch = self.nerf.coords[rand_inds]
 
         loss_poses = []
@@ -218,14 +224,18 @@ class Navigator(NavigatorBase):
             self.filter.weights[index] = 1/losses[index]
         total_nerf_time += nerf_time
 
+        # Weight normalization and resamplling here!!
         self.filter.update()
         self.num_updates += 1
         print("UPDATE STEP NUMBER", self.num_updates, "RAN")
         print("number particles:", self.num_particles)
 
+        # Particle annealing step
         if self.use_refining: # TODO make it where you can reduce number of particles without using refining
             self.check_refine_gate()
 
+
+        # Postprocessing: Visualize the results
         if self.use_weighted_avg:
             avg_pose = self.filter.compute_weighted_position_average()
         else:
@@ -268,11 +278,180 @@ class Navigator(NavigatorBase):
         update_time = time.time() - start_time
         print("forward passes took:", total_nerf_time, "out of total", update_time, "for update step")
 
+
+        # Predict step: Motion model
+        # if run_predicts is True: Use Odometry
+        # if run_predicts is False: Use robot dynamics which is predict no motion
         if not self.run_predicts:
             self.filter.predict_no_motion(self.px_noise, self.py_noise, self.pz_noise, self.rot_x_noise, self.rot_y_noise, self.rot_z_noise) #  used if you want to localize a static image
         
         # return is just for logging
         return pose_est
+
+    
+    def rgb_run_adaptive(self, msg, get_rays_fn=None, render_full_image=False):
+        print("processing image")
+        start_time = time.time()
+        self.rgb_input_count += 1
+
+        # make copies to prevent mutations
+        particles_position_before_sampling = np.copy(self.filter.particles['position'])
+        particles_rotation_before_sampling = [gtsam.Rot3(i.matrix()) for i in self.filter.particles['rotation']]
+        # particles_rotation_before_sampling = np.copy(self.filter.particles['rotation'])
+
+        # print("self.filter.particles['rotation'] type: ", type(self.filter.particles['rotation'])) # numpy array
+        # print("self.filter.particles['rotation'] shape: ", self.filter.particles['rotation'].shape) # (300, )
+        # print("self.filter.particles['rotation'] elem type: ", type(self.filter.particles['rotation'][0])) # Rot3
+
+        particles_weights_before_sampling = self.filter.weights
+        sum_weight = np.sum(particles_weights_before_sampling)
+        particles_weights_before_sampling /= sum_weight
+        particles_num_before_sampling = self.filter.num_particles
+
+        # Set particles as None
+        self.filter.particles['position'] = None
+        self.filter.particles['rotation'] = None
+        self.filter.num_particles = 0
+        self.filter.weights = None
+
+        # Update the sensor image
+        if self.use_received_image:
+            img = self.br.imgmsg_to_cv2(msg)
+            # resize input image so it matches the scale that NeRF expects
+            img = cv2.resize(self.br.imgmsg_to_cv2(msg), (int(self.nerf.W), int(self.nerf.H)))
+            # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            self.nerf.obs_img = img
+            show_true = self.view_debug_image_iteration != 0 and self.num_updates == self.view_debug_image_iteration-1
+            self.nerf.get_poi_interest_regions(show_true, self.sampling_strategy)
+            # plt.imshow(self.nerf.obs_img)
+            # plt.show()
+
+        ###### Start Sampling
+        # TODO Choose reasonable distribution params: kld_epsilon and its related z to decrease computation time
+        total_nerf_time = 0
+        M = 0 # Sampling particle number
+        Mx = 0 # KLD particle number bound
+        Mxmin = 30 # Minimum particle number
+        Mmax = 500 # Maximum particle number
+        k = 0 # Non-empty bin number which decides the sampling size
+        kld_epsilon = 0.01 # goal KLD distance between the sampling distribution and the true distribution
+        z = 2 # statistic value which is related with kld_epsilon
+
+        # Set the empty bin
+        trans_rand = 0.5
+        space_size = trans_rand * 2
+        bin_size = space_size / 5 # 0.2m
+        H = np.zeros((5, 5, 5))
+
+        # Prepare for computing weights
+        if self.sampling_strategy == 'random':
+            # self.nerf.coords shape: (H * W, 2)
+            rand_inds = np.random.choice(self.nerf.coords.shape[0], size=self.nerf.batch_size, replace=False)
+            # batch shape: (batch_size, 2)
+            batch = self.nerf.coords[rand_inds]
+
+        # Sampling
+        while (M < Mx or M < Mxmin):
+            # Sample an index j from the discrete distribution give by the last time weights
+            choice = np.random.choice(particles_num_before_sampling, 1, p = particles_weights_before_sampling, replace=True)
+            # High likely particle
+            particle_position = particles_position_before_sampling[int(choice)]
+            particle_rotation = particles_rotation_before_sampling[int(choice)]
+            # print("particle_position shape: ", particle_position.shape) # (3, )
+            # print("particle_rotation type: ", type(particle_rotation)) # gtsam.gtsam.Rot3
+
+            # Predict step without motion
+            self.filter.predict_no_motion_i(M, particle_position, particle_rotation, 
+                                            self.px_noise, self.py_noise, self.pz_noise, 
+                                            self.rot_x_noise, self.rot_y_noise, self.rot_z_noise)
+            # Update step
+            loss_poses = []
+            loss_pose = np.zeros((4,4))
+            loss_pose[0:3, 0:3] = self.filter.particles['rotation'][M].matrix()
+            loss_pose[0:3,3] = self.filter.particles['position'][M, 0:3]
+            loss_pose[3,3] = 1.0
+            loss_poses.append(loss_pose)
+            losses, nerf_time = self.nerf.get_loss(loss_poses, batch, self.photometric_loss)
+            # Update weights
+            if self.filter.weights is None:
+                self.filter.weights = np.square(np.square(1 / losses[0]))
+            else:
+                self.filter.weights = np.hstack((self.filter.weights, np.square(np.square(1 / losses[0]))))
+            total_nerf_time += nerf_time
+            # Update k: Non-empty bin number
+            x_idx = int(((self.filter.particles['position'][M, 0] // bin_size + 1) + trans_rand // bin_size) - 1)
+            y_idx = int(((self.filter.particles['position'][M, 1] // bin_size + 1) + trans_rand // bin_size) - 1)
+            z_idx = int(((self.filter.particles['position'][M, 2] // bin_size + 1) + trans_rand // bin_size) - 1)
+            if H[x_idx, y_idx, z_idx] == 0:
+                k += 1
+                # print("update k: ", k)
+                H[x_idx, y_idx, z_idx] = 1
+                if k > 1:
+                    Mx = (k-1)/(2*kld_epsilon)*(1-2/(9*(k-1))+((2/(9*(k-1)))**0.5)*z)**3
+                    # print("Mx: ", Mx)
+            # Update sampling particle number
+            self.filter.num_particles += 1
+            M += 1
+            if M == Mmax:
+                break
+
+        # Weight normalization and resamplling here!!
+        self.filter.normalize_weight()
+        self.last_particle_num = M
+        self.num_updates += 1
+        print("UPDATE STEP NUMBER", self.num_updates, "RAN")
+        print("number particles:", M)
+
+        # Particle annealing step
+        if self.use_refining: # TODO make it where you can reduce number of particles without using refining
+            self.check_refine_gate()
+
+        # Postprocessing: Visualize the results
+        if self.use_weighted_avg:
+            avg_pose = self.filter.compute_weighted_position_average()
+        else:
+            avg_pose = self.filter.compute_simple_position_average()
+
+        avg_rot = self.filter.compute_simple_rotation_average()
+        self.nerf_pose = gtsam.Pose3(avg_rot, gtsam.Point3(avg_pose[0], avg_pose[1], avg_pose[2])).matrix()
+
+        if self.plot_particles:
+            self.visualize()
+            
+        # TODO add ability to render several frames
+        if self.view_debug_image_iteration != 0 and (self.num_updates == self.view_debug_image_iteration):
+            self.nerf.visualize_nerf_image(self.nerf_pose)
+
+        if not self.use_received_image:
+            if self.use_weighted_avg:
+                print("average position of all particles: ", self.filter.compute_weighted_position_average())
+                print("position error: ", np.linalg.norm(self.gt_pose[0:3,3] - self.filter.compute_weighted_position_average()))
+            else:
+                print("average position of all particles: ", self.filter.compute_simple_position_average())
+                print("position error: ", np.linalg.norm(self.gt_pose[0:3,3] - self.filter.compute_simple_position()))
+
+        if self.use_weighted_avg:
+            position_est = self.filter.compute_weighted_position_average()
+        else:
+            position_est = self.filter.compute_simple_position_average()
+        rot_est = self.filter.compute_simple_rotation_average()
+        pose_est = gtsam.Pose3(rot_est, position_est).matrix()
+
+        if self.log_results:
+            self.all_pose_est.append(pose_est)
+        
+        if not self.run_inerf_compare:
+            img_timestamp = msg.header.stamp
+            self.publish_pose_est(pose_est, img_timestamp)
+        else:
+            self.publish_pose_est(pose_est)
+    
+        update_time = time.time() - start_time
+        print("forward passes took:", total_nerf_time, "out of total", update_time, "for update step")
+        
+        # return is just for logging
+        return pose_est
+
     
     def check_if_position_error_good(self, return_error = False):
         """
@@ -312,6 +491,8 @@ class Navigator(NavigatorBase):
             self.visualize()
     
     def set_initial_particles(self):
+        # num_particles is set to 300 as the initial number specified in config file
+        # Can change this number
         initial_positions = np.zeros((self.num_particles, 3))
         rots = []
         for index, particle in enumerate(self.initial_particles_noise):
@@ -322,13 +503,20 @@ class Navigator(NavigatorBase):
             theta = particle[4]
             psi = particle[5]
 
+            # get_pose func from utils is used to get particle pose from x y z and phi theta psi
             particle_pose = get_pose(phi, theta, psi, x, y, z, self.nerf.obs_img_pose, self.center_about_true_pose)
             
             # set positions
             initial_positions[index,:] = [particle_pose[0,3], particle_pose[1,3], particle_pose[2,3]]
             # set orientations
-            rots.append(gtsam.Rot3(particle_pose[0:3,0:3]))
+            rots.append(gtsam.Rot3(particle_pose[0:3,0:3])) # element is a gtsam pose with 3x3 rotation matrix
             # print(initial_particles)
+        # print("max x: ", np.max(initial_positions[:, 0]))
+        # print("min x: ", np.min(initial_positions[:, 0]))
+        # print("max y: ", np.max(initial_positions[:, 1]))
+        # print("min y: ", np.min(initial_positions[:, 1]))
+        # print("max z: ", np.max(initial_positions[:, 2]))
+        # print("min z: ", np.min(initial_positions[:, 2]))
         return {'position':initial_positions, 'rotation':np.array(rots)}
 
     def set_noise(self, scale):
@@ -349,6 +537,8 @@ class Navigator(NavigatorBase):
         print("sd_xyz:", sd_xyz)
         print("norm sd_xyz:", np.linalg.norm(sd_xyz))
 
+        # Corresponding to the Algorithm 1. in the paper
+        # To adjust the motion uncertainty and the number of particles according to some thresholds
         if norm_std < self.alpha_super_refine:
             print("SUPER REFINE MODE ON")
             # reduce original noise by a factor of 4
@@ -462,8 +652,8 @@ if __name__ == "__main__":
 
     if run_inerf_compare:
         num_starts_per_dataset = 5 # TODO make this a param
-        datasets = ['fern', 'horns', 'fortress', 'room'] # TODO make this a param
-        # datasets = ['fern']
+        # datasets = ['fern', 'horns', 'fortress', 'room'] # TODO make this a param
+        datasets = ['fern']
 
         total_position_error_good = []
         total_rotation_error_good = []
@@ -483,6 +673,7 @@ if __name__ == "__main__":
                     used_img_nums.add(img_num)
                 
                 else:
+                    print("i: ", i)
                     start_file = start_pose_files[i]
                     img_num = int(start_file.split('_')[5])
 
@@ -502,7 +693,8 @@ if __name__ == "__main__":
                     position_error_good.append(int(mcl_local.check_if_position_error_good()))
                     rotation_error_good.append(int(mcl_local.check_if_rotation_error_good()))
                     if ii != 0:
-                        mcl_local.rgb_run('temp')
+                        # mcl_local.rgb_run('temp')
+                        mcl_local.rgb_run_adaptive('temp')
                         num_forward_passes_per_iteration.append(num_forward_passes_per_iteration[ii-1] + mcl_local.num_particles * (mcl_local.course_samples + mcl_local.fine_samples) * mcl_local.batch_size)
                     ii += 1
 
@@ -524,5 +716,6 @@ if __name__ == "__main__":
         mcl = Navigator()      
         while not rospy.is_shutdown():
             if mcl.img_msg is not None:
-                mcl.rgb_run(mcl.img_msg)
+                # mcl.rgb_run(mcl.img_msg)
+                mcl_local.rgb_run_adaptive(mcl.img_msg)
                 mcl.img_msg = None # TODO not thread safe
