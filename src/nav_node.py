@@ -331,17 +331,17 @@ class Navigator(NavigatorBase):
         total_nerf_time = 0
         M = 0 # Sampling particle number
         Mx = 0 # KLD particle number bound
-        Mxmin = 30 # Minimum particle number
-        Mmax = 500 # Maximum particle number
+        Mxmin = 10 # Minimum particle number
+        Mmax = 3000 # Maximum particle number
         k = 0 # Non-empty bin number which decides the sampling size
-        kld_epsilon = 0.01 # goal KLD distance between the sampling distribution and the true distribution
-        z = 2 # statistic value which is related with kld_epsilon
+        kld_epsilon = 0.05 # goal KLD distance between the sampling distribution and the true distribution
+        z = 2.0 # statistic value which is related with kld_epsilon, P=0.8413
 
         # Set the empty bin
-        trans_rand = 0.5
+        trans_rand = 1.0
         space_size = trans_rand * 2
-        bin_size = space_size / 5 # 0.2m
-        H = np.zeros((5, 5, 5))
+        bin_size = space_size / 20 # 0.1m
+        H = np.zeros((20, 20, 20))
 
         # Prepare for computing weights
         if self.sampling_strategy == 'random':
@@ -352,6 +352,7 @@ class Navigator(NavigatorBase):
 
         # Sampling
         while (M < Mx or M < Mxmin):
+        # while (M < Mx) or (M == 0):
             # Sample an index j from the discrete distribution give by the last time weights
             choice = np.random.choice(particles_num_before_sampling, 1, p = particles_weights_before_sampling, replace=True)
             # High likely particle
@@ -392,8 +393,9 @@ class Navigator(NavigatorBase):
             # Update sampling particle number
             self.filter.num_particles += 1
             M += 1
-            if M == Mmax:
-                break
+            # Set a maximum number for KLD sampling
+            # if M == Mmax:
+            #     break
 
         # Weight normalization and resamplling here!!
         self.filter.normalize_weight()
@@ -460,11 +462,13 @@ class Navigator(NavigatorBase):
         acceptable_error = 0.05
         if self.use_weighted_avg:
             error = np.linalg.norm(self.gt_pose[0:3,3] - self.filter.compute_weighted_position_average())
+            print("position error: ", error)
             if return_error:
                 return error
             return error < acceptable_error
         else:
             error = np.linalg.norm(self.gt_pose[0:3,3] - self.filter.compute_simple_position_average())
+            print("position error: ", error)
             if return_error:
                 return error
             return error < acceptable_error
@@ -643,6 +647,46 @@ def average_arrays(axis_list):
     plt.grid()
     plt.show()
 
+
+def plot_error(total_error_dataset, error_type = 'Position'):
+    """
+    Plot the error change
+    total_error_dataset: list of list. [per img in a dataset[per iteration in one img]]
+    img number in one dataset is default = 5.
+    """
+    for img_error in total_error_dataset:
+        iteration_num = len(img_error)
+        x = list(range(0, iteration_num))
+        y = img_error
+        # Plot
+        if error_type == 'Position':
+            plt.plot(x, y)
+            plt.xlabel("Iteration number")
+            plt.ylabel("Position Error")
+            # plt.ylim(0, 1.0)
+        elif error_type == 'Rotation':
+            plt.plot(x, y)
+            plt.xlabel("Iteration number")
+            plt.ylabel("Rotation Error")
+        plt.grid()
+        plt.show()
+
+
+def plot_particle_num(total_particle_num):
+    """
+    Plot the particle number change within one localization process of an image
+    """
+    for img_particle in total_particle_num:
+        iteration_num = len(img_particle)
+        x = list(range(0, iteration_num))
+        y = img_particle
+        plt.plot(x, y)
+        plt.xlabel("Iteration number")
+        plt.ylabel("Particle number")
+        plt.grid()
+        plt.show()
+
+
 if __name__ == "__main__":
     rospy.init_node("nav_node")
 
@@ -658,6 +702,7 @@ if __name__ == "__main__":
         total_position_error_good = []
         total_rotation_error_good = []
         total_num_forward_passes = []
+        total_particle_num = []
         for dataset_index, dataset_name in enumerate(datasets):
             print("Starting iNeRF Style Test on Dataset: ", dataset_name)
             if use_logged_start:
@@ -685,16 +730,19 @@ if __name__ == "__main__":
                 num_forward_passes_per_iteration = [0]
                 position_error_good = []
                 rotation_error_good = []
+                particle_num = []
                 ii = 0
                 while num_forward_passes_per_iteration[-1] < mcl_local.forward_passes_limit:
                     print()
-                    print("forward pass limit, current number forward passes:", mcl_local.forward_passes_limit, num_forward_passes_per_iteration[-1])
+                    # print("forward pass limit, current number forward passes:", mcl_local.forward_passes_limit, num_forward_passes_per_iteration[-1])
 
-                    position_error_good.append(int(mcl_local.check_if_position_error_good()))
-                    rotation_error_good.append(int(mcl_local.check_if_rotation_error_good()))
+                    position_error_good.append(mcl_local.check_if_position_error_good(return_error=True))
+                    rotation_error_good.append(mcl_local.check_if_rotation_error_good(return_error=True))
+                    particle_num.append(mcl_local.filter.num_particles)
                     if ii != 0:
                         # mcl_local.rgb_run('temp')
                         mcl_local.rgb_run_adaptive('temp')
+                        print("-------------------------------------------------------")
                         num_forward_passes_per_iteration.append(num_forward_passes_per_iteration[ii-1] + mcl_local.num_particles * (mcl_local.course_samples + mcl_local.fine_samples) * mcl_local.batch_size)
                     ii += 1
 
@@ -707,9 +755,18 @@ if __name__ == "__main__":
                 total_num_forward_passes.append(num_forward_passes_per_iteration)
                 total_position_error_good.append(position_error_good)
                 total_rotation_error_good.append(rotation_error_good)
+                total_particle_num.append(particle_num)
 
-        average_arrays([total_num_forward_passes, total_position_error_good])
-        average_arrays([total_num_forward_passes, total_rotation_error_good])
+        # Plot forward iteration number
+        # average_arrays([total_num_forward_passes, total_position_error_good])
+        # average_arrays([total_num_forward_passes, total_rotation_error_good])
+
+        # Plot Position and Rotation error
+        plot_error(total_position_error_good, error_type='Position')
+        plot_error(total_rotation_error_good, error_type='Rotation')
+
+        # Plot particle number
+        plot_particle_num(total_particle_num)
 
     # run normal live ROS mode
     else:

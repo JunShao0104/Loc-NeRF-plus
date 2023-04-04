@@ -34,6 +34,7 @@ use_logged_start: True # use saved logs for initial pose
 log_prefix: use_annealing # add a prefix to the log file names for convenience to keep track of different runs
 log_directory: /root/catkin_ws/src/Loc-NeRF-plus/logs/inerf_compare # Directory to save npy files.
 forward_passes_limit: 78643200 # end optimization after this number of forward passes have run
+# forward_passes_limit: 786432000 # end optimization after this number of forward passes have run
 
 #### custom data realtime tracking mode params ####
 # Note these values are all overwritten/not used if run_inerf_compare is True
