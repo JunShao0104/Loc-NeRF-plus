@@ -16,7 +16,7 @@ num_particles: 300 # Number of initial particles.
 
 #### dataset and weight loading ####
 dataset_type: llff # llff, custom
-ckpt_dir: /data/inerf/ckpts
+ckpt_dir: /data/inerf/ckpts # nerf weights
 data_dir: /data/inerf/data/nerf_synthetic # only needed for LLFF data
 
 #### convergence protection #####
@@ -75,7 +75,7 @@ nerf_nav_directory : /home/dominic/Downloads/input_data1
 
 #### particle annealing params ####
 use_refining: False # Decrease position noise as we start to converge.
-use_particle_reduction: False # Reduce number of particles as they start to converge
+use_particle_reduction: True # Reduce number of particles as they start to converge
 min_number_particles: 100 # reduce particles to this amount during particle reduction
 
 # position standard deviation thresholds to activate particle annealing

@@ -331,7 +331,7 @@ class Navigator(NavigatorBase):
         total_nerf_time = 0
         M = 0 # Sampling particle number
         Mx = 0 # KLD particle number bound
-        Mxmin = 10 # Minimum particle number
+        Mxmin = 30 # Minimum particle number
         Mmax = 3000 # Maximum particle number
         k = 0 # Non-empty bin number which decides the sampling size
         kld_epsilon = 0.05 # goal KLD distance between the sampling distribution and the true distribution
@@ -394,8 +394,8 @@ class Navigator(NavigatorBase):
             self.filter.num_particles += 1
             M += 1
             # Set a maximum number for KLD sampling
-            # if M == Mmax:
-            #     break
+            if M == Mmax:
+                break
 
         # Weight normalization and resamplling here!!
         self.filter.normalize_weight()
@@ -695,9 +695,9 @@ if __name__ == "__main__":
     log_directory = rospy.get_param("log_directory")
 
     if run_inerf_compare:
-        num_starts_per_dataset = 5 # TODO make this a param
+        num_starts_per_dataset = 1 # TODO make this a param
         # datasets = ['fern', 'horns', 'fortress', 'room'] # TODO make this a param
-        datasets = ['fern']
+        datasets = ['room']
 
         total_position_error_good = []
         total_rotation_error_good = []
@@ -740,8 +740,8 @@ if __name__ == "__main__":
                     rotation_error_good.append(mcl_local.check_if_rotation_error_good(return_error=True))
                     particle_num.append(mcl_local.filter.num_particles)
                     if ii != 0:
-                        # mcl_local.rgb_run('temp')
-                        mcl_local.rgb_run_adaptive('temp')
+                        mcl_local.rgb_run('temp') # original particle filter
+                        # mcl_local.rgb_run_adaptive('temp') # adpative particle filter
                         print("-------------------------------------------------------")
                         num_forward_passes_per_iteration.append(num_forward_passes_per_iteration[ii-1] + mcl_local.num_particles * (mcl_local.course_samples + mcl_local.fine_samples) * mcl_local.batch_size)
                     ii += 1
