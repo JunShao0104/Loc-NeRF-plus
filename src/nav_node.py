@@ -697,7 +697,7 @@ if __name__ == "__main__":
     if run_inerf_compare:
         num_starts_per_dataset = 1 # TODO make this a param
         # datasets = ['fern', 'horns', 'fortress', 'room'] # TODO make this a param
-        datasets = ['room']
+        datasets = ['horns']
 
         total_position_error_good = []
         total_rotation_error_good = []
@@ -740,8 +740,8 @@ if __name__ == "__main__":
                     rotation_error_good.append(mcl_local.check_if_rotation_error_good(return_error=True))
                     particle_num.append(mcl_local.filter.num_particles)
                     if ii != 0:
-                        mcl_local.rgb_run('temp') # original particle filter
-                        # mcl_local.rgb_run_adaptive('temp') # adpative particle filter
+                        # mcl_local.rgb_run('temp') # original particle filter
+                        mcl_local.rgb_run_adaptive('temp') # adpative particle filter
                         print("-------------------------------------------------------")
                         num_forward_passes_per_iteration.append(num_forward_passes_per_iteration[ii-1] + mcl_local.num_particles * (mcl_local.course_samples + mcl_local.fine_samples) * mcl_local.batch_size)
                     ii += 1

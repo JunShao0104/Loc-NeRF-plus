@@ -74,7 +74,7 @@ run_nerfnav_compare: False
 nerf_nav_directory : /home/dominic/Downloads/input_data1
 
 #### particle annealing params ####
-use_refining: False # Decrease position noise as we start to converge.
+use_refining: True # Decrease position noise as we start to converge.
 use_particle_reduction: False # Reduce number of particles as they start to converge
 min_number_particles: 100 # reduce particles to this amount during particle reduction
 
