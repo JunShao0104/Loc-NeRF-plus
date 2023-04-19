@@ -57,6 +57,7 @@ sudo apt-get install tk-dev
 ## Starting Loc-NeRF-plus
 We will use ROS and rviz as a structure for running Loc-NeRF and for visualizing performance. 
 As a general good practice, remember to source your workspace for each terminal you use.
+
   0. Open a new terminal in the host machine and run:
   ```bash
   xhost +
@@ -76,7 +77,7 @@ As a general good practice, remember to source your workspace for each terminal 
 
   4. If you are not running with a rosbag, i.e. you are using LLFF data, then Loc-NeRF should start and you should be set. If you are using a rosbag, continue to the next steps.
 
-  5. In another terminal launch VIO
+  5. In another terminal launch VIO.
 
   6. Finally, in another terminal, play your rosbag:
   ```bash
