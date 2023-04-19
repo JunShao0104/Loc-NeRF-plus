@@ -703,6 +703,10 @@ if __name__ == "__main__":
         total_rotation_error_good = []
         total_num_forward_passes = []
         total_particle_num = []
+
+        """
+        For loop
+        """
         for dataset_index, dataset_name in enumerate(datasets):
             print("Starting iNeRF Style Test on Dataset: ", dataset_name)
             if use_logged_start:
@@ -756,7 +760,8 @@ if __name__ == "__main__":
                 total_position_error_good.append(position_error_good)
                 total_rotation_error_good.append(rotation_error_good)
                 total_particle_num.append(particle_num)
-
+        
+        
         # Plot forward iteration number
         # average_arrays([total_num_forward_passes, total_position_error_good])
         # average_arrays([total_num_forward_passes, total_rotation_error_good])

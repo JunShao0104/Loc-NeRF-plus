@@ -30,7 +30,7 @@ convergence_noise: 0.2 # meters, uniformly sample this far from mean for each ax
 run_inerf_compare: True
 global_loc_mode: False # Perform Loc-NeRF with Loc-NeRF.
 log_results: False # Save pose estimate for each iteration. Also save a file with gt pose and the initial pose guess if use_logged_start is False.
-use_logged_start: False # use saved logs for initial pose
+use_logged_start: True # use saved logs for initial pose
 log_prefix: use_annealing # add a prefix to the log file names for convenience to keep track of different runs
 log_directory: /root/catkin_ws/src/Loc-NeRF-plus/logs/inerf_compare # Directory to save npy files.
 # forward_passes_limit: 78643200 # end optimization after this number of forward passes have run
