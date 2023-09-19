@@ -1,6 +1,7 @@
 # Loc-NeRF-plus
 
 An Enhanced Monte Carlo Localization using Neural Radiance Fields.
+
 Our presentation video is here: [https://www.youtube.com/watch?v=g6yx-9psMI4]
 
 ## Coordinate Frames
