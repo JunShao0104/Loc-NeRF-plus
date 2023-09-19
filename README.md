@@ -1,6 +1,7 @@
 # Loc-NeRF-plus
 
-An Enhanced Monte Carlo Localization using Neural Radiance Fields. 
+An Enhanced Monte Carlo Localization using Neural Radiance Fields.
+Our presentation video is here: [https://www.youtube.com/watch?v=g6yx-9psMI4]
 
 ## Coordinate Frames
 To be consistent throughout the code and in the yaml files, we define coordinates using the camera frame commonly used for NeRF (x right, y up, z inward from the perspective of the camera) unless stated otherwise. Coordinates are FROM Camera TO World unless otherwise stated. Note this is not the same as the more common camera frame used in robotics (x right, y down, z outward).
